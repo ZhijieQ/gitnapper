@@ -1,0 +1,4 @@
+# Gitnapper README
+
+**Enjoy!**
+
