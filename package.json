@@ -38,6 +38,7 @@
   "dependencies": {
     "archiver": "^7.0.1",
     "archiver-zip-encrypted": "^2.0.0",
+    "axios": "^1.8.4",
     "glob": "^11.0.1",
     "ignore": "^7.0.3",
     "simple-git": "^3.27.0"
