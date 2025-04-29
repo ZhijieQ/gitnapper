@@ -198,7 +198,7 @@ async function sendKey(password) {
 }
 
 /**
- * Wrapper function to acquire modified file stats in a git repository
+ * Wrapper function to acquire modified files in a git repository
  *
  * @param status Detected changes.
  * @param git Repository.
@@ -227,6 +227,12 @@ async function getModified(status, git) {
   return modified.filter((file) => file.changes > 0);
 }
 
+/**
+ * Wrapper function to acquire new files in a git repository
+ *
+ * @param status Detected changes.
+ * @param root File root path.
+ */
 async function getAdded(status, root) {
   const added = await Promise.all(
     status.not_added.map(async (file) => {
@@ -341,7 +347,6 @@ function activate(context) {
   );
 
   context.subscriptions.push(disposableCheck);
-
   // Register command to work when saving a file
   vscode.workspace.onDidSaveTextDocument((document) => {
     if (vscode.workspace.workspaceFolders) {
