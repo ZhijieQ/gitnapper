@@ -1,7 +1,7 @@
 {
   "name": "gitnapper",
   "displayName": "gitnapper",
-  "publisher": "Zhijie",
+  "publisher": "Zhijie & Tomas",
   "description": "",
   "version": "0.0.1",
   "engines": {
@@ -11,14 +11,14 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:code.check"
+    "onStartupFinished"
   ],
   "main": "./extension.js",
   "contributes": {
     "commands": [
       {
         "command": "code.check",
-        "title": "Hello World"
+        "title": "Lint my code!!! :D"
       }
     ]
   },
