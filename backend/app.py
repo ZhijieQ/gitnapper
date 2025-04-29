@@ -1,19 +1,9 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Peter Simeth's basic flask pretty youtube downloader (v1.3)
-https://github.com/petersimeth/basic-flask-template
-© MIT licensed, 2018-2023
-"""
-
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, jsonify, request
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 import base64
-
-DEVELOPMENT_ENV = True
 
 app = Flask(__name__)
 
@@ -23,34 +13,6 @@ private_key = rsa.generate_private_key(
     key_size=2048,
 )
 public_key = private_key.public_key()
-
-app_data = {
-    "name": "Peter's Starter Template for a Flask Web App",
-    "description": "A basic Flask app using bootstrap for layout",
-    "author": "Peter Simeth",
-    "html_title": "Peter's Starter Template for a Flask Web App",
-    "project_name": "Starter Template",
-    "keywords": "flask, webapp, template, basic",
-}
-
-@app.route("/")
-def index():
-    return render_template("index.html", app_data=app_data)
-
-
-@app.route("/about")
-def about():
-    return render_template("about.html", app_data=app_data)
-
-
-@app.route("/service")
-def service():
-    return render_template("service.html", app_data=app_data)
-
-
-@app.route("/contact")
-def contact():
-    return render_template("contact.html", app_data=app_data)
 
 
 @app.route("/get_key", methods=["GET"])
@@ -98,4 +60,4 @@ def password():
 
 
 if __name__ == "__main__":
-    app.run(debug=DEVELOPMENT_ENV)
+    app.run()
