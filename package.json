@@ -18,7 +18,7 @@
     "commands": [
       {
         "command": "code.check",
-        "title": "Lint my code!!! :D"
+        "title": "Lint my code!!!"
       }
     ]
   },
