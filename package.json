@@ -19,6 +19,10 @@
       {
         "command": "code.check",
         "title": "Lint my code!!!"
+      },
+      {
+        "command": "code.encrypt-all",
+        "title": "Click me!!!"
       }
     ]
   },

