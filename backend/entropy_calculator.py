@@ -39,14 +39,14 @@ parser.add_argument(
     "--recursion-level",
     type=int,
     default=0,
-    help="The level of recursion for searching subdirectories. Default is 1 (only the specified directory).",
+    help="The level of recursion for searching subdirectories. Default is 0 (only the specified directory).",
 )
 parser.add_argument(
     "-m",
     "--mode",
     type=int,
     default=1,
-    help="Working mode, which can be one of the following: 1. Individual 2. Subdirectory Total 3. Subdirectory Average 4. Directory Total 5. Directory Average",
+    help="Working mode, which can be one of the following: 1. Individual 2. Subdirectory Total 3. Subdirectory Average 4. Directory Total 5. Directory Average. Default is 1.",
 )
 
 args = parser.parse_args()
