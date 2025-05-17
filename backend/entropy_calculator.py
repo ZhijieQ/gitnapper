@@ -1,3 +1,9 @@
+"""
+Watcher process for ransomware detection based on the bit-per-byte entropy
+value. All detection schemes assume the attack will not delete original files,
+only override them.
+"""
+
 import math
 import argparse
 import os
@@ -8,12 +14,15 @@ from collections import Counter
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    format="%(asctime)s [%(levelname).4s] - %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
     ],
 )
-
+BOLD = "\033[1m"
+END = "\033[0m"
+GREEN = "\033[32m"
+RED = "\033[31m"
 parser = argparse.ArgumentParser(
     prog="Entropy Detection Daemon",
     description="Background process that analyzes files for sudden entropy spikes",
@@ -35,15 +44,19 @@ parser.add_argument(
 parser.add_argument(
     "-m",
     "--mode",
-    type=str,
-    default="average",
-    help="Working mode.",
+    type=int,
+    default=1,
+    help="Working mode, which can be one of the following: 1. Individual 2. Subdirectory Total 3. Subdirectory Average 4. Directory Total 5. Directory Average",
 )
 
 args = parser.parse_args()
 
 
 class Files:
+    """
+    File information dataclass.
+    """
+
     @staticmethod
     def entropy(bytecount: Counter):
         """
@@ -53,7 +66,7 @@ class Files:
             bytecount (str): Frequency of each byte value.
 
         Returns:
-            float: Entropy value
+            float: Entropy value.
         """
         value = 0
         size = sum(bytecount.values())
@@ -67,13 +80,13 @@ class Files:
     @staticmethod
     def bytecount(path: str):
         """
-        Returns the bytecount of a file
+        Returns the bytecount of a file.
 
         Args:
             path (str): File location
 
         Returns:
-            float: Entropy value
+            float: Byte frecuency.
         """
         with open(path, "rb") as f:
             return Counter(f.read())
@@ -81,8 +94,7 @@ class Files:
     @staticmethod
     def allfiles(path: str, recursion_level: int, ignored: list):
         """
-        Recursively computes the average entropy value (sum of file entropies)
-        for the current directory.
+        Obtains all file paths derived from PATH.
 
         Args:
             path (str): Working directory path.
@@ -90,7 +102,7 @@ class Files:
             ignored (list): List of ignored directories or files.
 
         Returns:
-            list: Files in the directory
+            list: Files in the directory.
         """
         fnames = [f for f in os.listdir(path) if f not in ignored]
         files = []
@@ -106,155 +118,158 @@ class Files:
 
         return files
 
+    @staticmethod
+    def group_by_dir(files: list):
+        """
+        Groups all files in a list according to their parent directory.
+        """
+        directories = {os.path.dirname(file): [] for file in files}
 
-"""
-- ficheros individuales
-- directorio (recursivo)
-- subdirectorio (sin recursion)
-"""
+        for file in files:
+            directories[os.path.dirname(file)].append(file)
+
+        return directories
 
 
-def individual(path: str, recursion_level: int, ignored: list):
-    old = {}
-    curr = {}
-    try:
-        while True:
-            files = Files.allfiles(
-                path=path,
-                recursion_level=recursion_level,
-                ignored=ignored,
-            )
-            curr = {f: round(Files.entropy(Files.bytecount(f)), 2) for f in files}
-            
-            for name, entropy in curr.items():
-                oentropy = old.get(name)
-                if not oentropy:
-                    logging.info(f"[NEW]\t{name}: {entropy} bits per byte")
-                elif abs(oentropy - entropy) > 1.0:
-                    logging.warn(f"\t{name}: entropy changed from {oentropy} to {entropy}")
-                elif entropy > 7.0:
-                    logging.warn(f"\t{name}: high entropy level")
-                
+class DetectionScheme:
 
-                pass
-            time.sleep(3)
-    except KeyboardInterrupt:
+    def __init__(self, path: str, mode: int, rl: int):
+        """
+        Constructor method for this class.
+        """
+        schemes = {
+            1: (self.individual, "Individual"),
+            2: (self.subdirectory_total, "Subdirectory Total"),
+            3: (self.subdirectory_average, "Subdirectory Average"),
+            4: (self.directory_total, "Directory Total"),
+            5: (self.directory_average, "Directory Average"),
+        }
+        self.mode = mode
+        self.path = os.path.abspath(path)
+        self.scheme, description = schemes[self.mode]
+
+        print(f"Scanning directory {self.path}")
+        print(f"    Mode: {description}")
+        print(f"    Recursion level: {rl}")
         print()
-        logging.info("Process interrupted. Exiting...")
 
-def directory():
-    pass
+    def individual(self, files: list[str]):
+        """
+        Detection scheme based on individual file entropy.
 
+        Args:
+            files (list): Files in the working directory.
+        """
+        return {f: round(Files.entropy(Files.bytecount(f)), 2) for f in files}
 
-def subdirectory():
-    pass
+    def subdirectory_total(self, files: list[str]):
+        """
+        Detection scheme based on the total file bytecount on every directory.
 
+        Args:
+            files (list): Files in the working directory.
+        """
+        dirs = Files.group_by_dir(files)
+        curr = {}
 
-def file_entropy(path: str):
-    """
-    Computes the entropy value of a file.
-
-    Args:
-        path (str): File location
-
-    Returns:
-        float: Entropy value
-    """
-    with open(path, "rb") as f:
-        data = f.read()
-
-    return entropy_value(Counter(data))
-
-
-def average_entropy(name: str, path: str, recursion_level: int, ignored: list):
-    """
-    Recursively computes the average entropy value (sum of file entropies)
-    for the current directory.
-
-    Args:
-        name (str): Working directory.
-        path (str): Working directory path.
-        recursion_level (int): Maximum recursion depth.
-        ignored (list): List of ignored directories or files.
-
-    Returns:
-        list: Files in the directory
-    """
-    entropy, files = {name: 0}, 0
-
-    fnames = [f for f in os.listdir(path) if f not in ignored]
-
-    if recursion_level < 0:
-        return {}
-
-    for fname in fnames:
-        fpath = f"{path}/{fname}"
-
-        if os.path.isdir(fpath):
-            entropy.update(
-                average_entropy(f"{name}->{fname}", fpath, recursion_level - 1, ignored)
+        for subdir, filenames in dirs.items():
+            curr[subdir] = round(
+                Files.entropy(sum([Files.bytecount(f) for f in filenames], Counter())),
+                2,
             )
-        elif os.path.isfile(fpath):
-            entropy[name] += file_entropy(fpath)
-            files += 1
 
-    entropy[name] = entropy[name] / files if files else entropy[name]
+        return curr
 
-    return entropy
+    def subdirectory_average(self, files: list[str]):
+        """
+        Detection scheme based on the average file entropy on every directory.
 
+        Args:
+            files (list): Files in the working directory.
+        """
+        dirs = Files.group_by_dir(files)
+        curr = {}
 
-def total_entropy(name: str, path: str, recursion_level: int, ignored: list):
-    """
-    Recursively computes the average entropy value (sum of total byte
-    entropies)  for the current directory.
-
-    Args:
-        name (str): Working directory.
-        path (str): Working directory path.
-        recursion_level (int): Maximum recursion depth.
-        ignored (list): List of ignored directories or files.
-
-    Returns:
-        list: Files in the directory
-    """
-    entropy, files = {name: 0}, 0
-    data = Counter()
-
-    fnames = [f for f in os.listdir(path) if f not in ignored]
-
-    if recursion_level < 0:
-        return {}
-
-    for fname in fnames:
-        fpath = f"{path}/{fname}"
-
-        if os.path.isdir(fpath):
-            entropy.update(
-                total_entropy(f"{name}->{fname}", fpath, recursion_level - 1, ignored)
+        for subdir, filenames in dirs.items():
+            curr[subdir] = round(
+                sum(Files.entropy(Files.bytecount(f)) for f in filenames)
+                / len(filenames),
+                2,
             )
-        elif os.path.isfile(fpath):
-            with open(fpath, "rb") as f:
-                data += Counter(f.read())
 
-    entropy[name] = entropy_value(data)
+        return curr
 
-    return entropy
+    def directory_total(self, files: list[str]):
+        """
+        Detection scheme based on the total file bytecount on every directory.
+
+        Args:
+            files (list): Files in the working directory.
+        """
+        return {
+            self.path: round(
+                Files.entropy(sum([Files.bytecount(f) for f in files], Counter())), 2
+            )
+        }
+
+    def directory_average(self, files: list[str]):
+        """
+        Detection scheme based on the average file entropy on every directory.
+
+        Args:
+            files (list): Files in the working directory.
+        """
+        return {
+            self.path: round(
+                sum(Files.entropy(Files.bytecount(f)) for f in files) / len(files),
+                2,
+            )
+        }
 
 
-individual(args.workdir, args.recursion_level, [".git", "node_modules", ".vscode"])
+def red(text: str):
+    """Prints a bolded red version of TEXT"""
+    return f"{BOLD}{RED}{text}{END}{END}"
 
-# try:
-#     while True:
-#         files = average_entropy(
-#             name="root",
-#             path=args.workdir,
-#             recursion_level=args.recursion_level,
-#             ignored=[".git", "node_modules", ".vscode"],
-#         )
 
-#         logging.info(f"Entropy level: {files}")
-#         time.sleep(3)
+def green(text: str):
+    """Prints a bolded green version of TEXT"""
+    return f"{BOLD}{GREEN}{text}{END}{END}"
 
-# except KeyboardInterrupt:
-#     print()
-#     logging.info("Process interrupted. Exiting...")
+
+old, curr = {}, {}
+CHANGE_THRESHOLD = 1.0
+ENTROPY_THRESHOLD = 7.0
+
+detector = DetectionScheme(path=args.workdir, mode=args.mode, rl=args.recursion_level)
+
+try:
+    while True:
+
+        # Get current files in the directory
+        files = Files.allfiles(
+            path=os.path.abspath(args.workdir),
+            recursion_level=args.recursion_level,
+            ignored=[".git", "node_modules", ".vscode", "venv"],
+        )
+
+        curr = detector.scheme(files)
+
+        for name, value in curr.items():
+            ovalue = old.get(name)
+            if not ovalue and value > ENTROPY_THRESHOLD:
+                logging.warning(f"{red(value)} bits per byte ({name})")
+            elif not ovalue:
+                logging.info(f"{green(value)} bits per byte ({name})")
+            elif abs(ovalue - value) > CHANGE_THRESHOLD:
+                logging.warning(
+                    f"{red(value)} bits per byte from {green(ovalue)} ({name}) "
+                )
+            elif value != ovalue and value > ENTROPY_THRESHOLD:
+                logging.warning(f"{red(value)} bits per byte ({name})")
+
+        old = curr
+        time.sleep(3)
+except KeyboardInterrupt:
+    print("\nInterrupted, exiting now...")
+    print()
