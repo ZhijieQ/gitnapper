@@ -180,7 +180,10 @@ try:
                 )
             elif value != ovalue and value > ENTROPY_THRESHOLD:
                 logging.warning(f"{utils.red(value)} bits per byte ({name})")
-
+            elif value != ovalue:
+                logging.warning(
+                    f"{utils.green(value)} bits per byte from {utils.green(ovalue)} ({name}) "
+                )
         old = curr
         time.sleep(3)
 except KeyboardInterrupt:
