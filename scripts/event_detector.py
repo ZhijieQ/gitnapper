@@ -81,6 +81,7 @@ class RansomwareDetector:
             '--format', '[%T] %e %w%f',
             '--timefmt', '%F %T',
             '-e', 'create',
+            '-e', 'modify',
             '-e', 'delete',
             '-e', 'moved_to',
             '-e', 'moved_from',
