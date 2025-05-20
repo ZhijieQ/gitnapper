@@ -4,14 +4,16 @@ value. All detection schemes assume the attack will not delete original files,
 only override them.
 """
 
-import math
 import argparse
 import os
 import time
 import logging
 import sys
+import utils
 from collections import Counter
 
+
+# Logging options
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname).4s] - %(message)s",
@@ -19,12 +21,10 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout),
     ],
 )
-BOLD = "\033[1m"
-END = "\033[0m"
-GREEN = "\033[32m"
-RED = "\033[31m"
+
+# Argument parsing
 parser = argparse.ArgumentParser(
-    prog="Entropy Detection Daemon",
+    prog="entropy_detector",
     description="Background process that analyzes files for sudden entropy spikes",
 )
 
@@ -50,85 +50,6 @@ parser.add_argument(
 )
 
 args = parser.parse_args()
-
-
-class Files:
-    """
-    File information dataclass.
-    """
-
-    @staticmethod
-    def entropy(bytecount: Counter):
-        """
-        Computes the entropy value of a byte count, which ranges in 0 to 8 bits per byte.
-
-        Args:
-            bytecount (str): Frequency of each byte value.
-
-        Returns:
-            float: Entropy value.
-        """
-        value = 0
-        size = sum(bytecount.values())
-
-        for count in bytecount.values():
-            p = count / size
-            value -= p * math.log2(p)
-
-        return value
-
-    @staticmethod
-    def bytecount(path: str):
-        """
-        Returns the bytecount of a file.
-
-        Args:
-            path (str): File location
-
-        Returns:
-            float: Byte frecuency.
-        """
-        with open(path, "rb") as f:
-            return Counter(f.read())
-
-    @staticmethod
-    def allfiles(path: str, recursion_level: int, ignored: list):
-        """
-        Obtains all file paths derived from PATH.
-
-        Args:
-            path (str): Working directory path.
-            recursion_level (int): Maximum recursion depth.
-            ignored (list): List of ignored directories or files.
-
-        Returns:
-            list: Files in the directory.
-        """
-        fnames = [f for f in os.listdir(path) if f not in ignored]
-        files = []
-        if recursion_level < 0:
-            return files
-
-        for fname in fnames:
-            fpath = f"{path}/{fname}"
-            if os.path.isdir(fpath):
-                files += Files.allfiles(fpath, recursion_level - 1, ignored)
-            elif os.path.isfile(fpath):
-                files.append(fpath)
-
-        return files
-
-    @staticmethod
-    def group_by_dir(files: list):
-        """
-        Groups all files in a list according to their parent directory.
-        """
-        directories = {os.path.dirname(file): [] for file in files}
-
-        for file in files:
-            directories[os.path.dirname(file)].append(file)
-
-        return directories
 
 
 class DetectionScheme:
@@ -160,7 +81,7 @@ class DetectionScheme:
         Args:
             files (list): Files in the working directory.
         """
-        return {f: round(Files.entropy(Files.bytecount(f)), 2) for f in files}
+        return {f: round(utils.entropy(utils.bytecount(f)), 2) for f in files}
 
     def subdirectory_total(self, files: list[str]):
         """
@@ -169,12 +90,12 @@ class DetectionScheme:
         Args:
             files (list): Files in the working directory.
         """
-        dirs = Files.group_by_dir(files)
+        dirs = utils.group_by_dir(files)
         curr = {}
 
         for subdir, filenames in dirs.items():
             curr[subdir] = round(
-                Files.entropy(sum([Files.bytecount(f) for f in filenames], Counter())),
+                utils.entropy(sum([utils.bytecount(f) for f in filenames], Counter())),
                 2,
             )
 
@@ -187,12 +108,12 @@ class DetectionScheme:
         Args:
             files (list): Files in the working directory.
         """
-        dirs = Files.group_by_dir(files)
+        dirs = utils.group_by_dir(files)
         curr = {}
 
         for subdir, filenames in dirs.items():
             curr[subdir] = round(
-                sum(Files.entropy(Files.bytecount(f)) for f in filenames)
+                sum(utils.entropy(utils.bytecount(f)) for f in filenames)
                 / len(filenames),
                 2,
             )
@@ -208,7 +129,7 @@ class DetectionScheme:
         """
         return {
             self.path: round(
-                Files.entropy(sum([Files.bytecount(f) for f in files], Counter())), 2
+                utils.entropy(sum([utils.bytecount(f) for f in files], Counter())), 2
             )
         }
 
@@ -221,21 +142,13 @@ class DetectionScheme:
         """
         return {
             self.path: round(
-                sum(Files.entropy(Files.bytecount(f)) for f in files) / len(files),
+                sum(utils.entropy(utils.bytecount(f)) for f in files) / len(files),
                 2,
             )
         }
 
 
-def red(text: str):
-    """Prints a bolded red version of TEXT"""
-    return f"{BOLD}{RED}{text}{END}{END}"
-
-
-def green(text: str):
-    """Prints a bolded green version of TEXT"""
-    return f"{BOLD}{GREEN}{text}{END}{END}"
-
+# Main Program
 
 old, curr = {}, {}
 CHANGE_THRESHOLD = 1.0
@@ -247,7 +160,7 @@ try:
     while True:
 
         # Get current files in the directory
-        files = Files.allfiles(
+        files = utils.allfiles(
             path=os.path.abspath(args.workdir),
             recursion_level=args.recursion_level,
             ignored=[".git", "node_modules", ".vscode", "venv"],
@@ -258,15 +171,15 @@ try:
         for name, value in curr.items():
             ovalue = old.get(name)
             if not ovalue and value > ENTROPY_THRESHOLD:
-                logging.warning(f"{red(value)} bits per byte ({name})")
+                logging.warning(f"{utils.red(value)} bits per byte ({name})")
             elif not ovalue:
-                logging.info(f"{green(value)} bits per byte ({name})")
+                logging.info(f"{utils.green(value)} bits per byte ({name})")
             elif abs(ovalue - value) > CHANGE_THRESHOLD:
                 logging.warning(
-                    f"{red(value)} bits per byte from {green(ovalue)} ({name}) "
+                    f"{utils.red(value)} bits per byte from {utils.green(ovalue)} ({name}) "
                 )
             elif value != ovalue and value > ENTROPY_THRESHOLD:
-                logging.warning(f"{red(value)} bits per byte ({name})")
+                logging.warning(f"{utils.red(value)} bits per byte ({name})")
 
         old = curr
         time.sleep(3)
