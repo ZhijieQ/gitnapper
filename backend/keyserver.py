@@ -69,19 +69,36 @@ def password():
 @app.route("/get_password", methods=["GET", "POST"])
 def get_password():
     """
-    Displays a form to enter an ID and shows the corresponding password.
+    Displays a form to enter an ID and shows the corresponding password
+    if the amount donated is greater than or equal to $1000.
     """
     password_to_display = None
     error_message = None
 
     if request.method == "POST":
         retrieval_id = request.form.get("retrieval_id")
-        if retrieval_id:
-            password_to_display = key_map.get(retrieval_id)
-            if not password_to_display:
-                error_message = "Invalid ID or password not found."
+        amount_str = request.form.get("amount")
+        
+        # You can also retrieve credit_card_number, expiration_date, and cvv here
+        # credit_card_number = request.form.get("credit_card_number")
+        # expiration_date = request.form.get("expiration_date")
+        # cvv = request.form.get("cvv")
+
+        if not retrieval_id:
+            error_message = "Please provide a Retrieval ID."
+        elif not amount_str:
+            error_message = "Please provide an Amount."
         else:
-            error_message = "Please provide an ID."
+            try:
+                amount = float(amount_str)
+                if amount >= 1000:
+                    password_to_display = key_map.get(retrieval_id)
+                    if not password_to_display:
+                        error_message = "Invalid ID or password not found."
+                else:
+                    error_message = "Amount must be $1000 or more to retrieve the password."
+            except ValueError:
+                error_message = "Invalid amount. Please enter a valid number."
 
     return render_template("password_retrieval.html", password=password_to_display, error=error_message)
 
